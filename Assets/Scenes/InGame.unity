@@ -660,7 +660,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CameraManager
   distance: 70
   verticalAngleMax: 85
-  verticalAngleMin: 25
+  verticalAngleMin: -50
   rotationSpeed: 50
 --- !u!1 &410087039
 GameObject:
@@ -1681,7 +1681,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1928888403
 Transform:
   m_ObjectHideFlags: 0

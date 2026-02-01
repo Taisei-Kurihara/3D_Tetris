@@ -11,17 +11,30 @@ public class GameMaster : Singleton_DestroyAvailableMonoSingleton<GameMaster>
     private float fallSec = 1;
     public float FallSec { get { return fallSec; } }
 
-    // グリッドサイズ定義.
+    // グリッドサイズ定義（ブロック数で指定）.
+    [SerializeField]
+    private Vector3Int gridBlockCount = new Vector3Int(10, 6, 10);
+
+    // 1ブロックのサイズ.
     private const float GRID_SIZE = 5f;
-    private const float Y_MIN = -12.5f;
-    private const float Y_MAX = 12.5f;
-    private const float XZ_MIN = -22.5f;
-    private const float XZ_MAX = 22.5f;
     private const float POOL_Y_POSITION = -100f;
+
+    // 動的に計算される範囲.
+    private float Y_MIN;
+    private float Y_MAX;
+    private float XZ_MIN;
+    private float XZ_MAX;
 
     // グリッドのサイズ計算.
     private int gridYSize;
     private int gridXZSize;
+
+    // 境界線ブロックリスト.
+    private List<GameObject> borderBlocks = new List<GameObject>();
+
+    // 境界線ブロックの色.
+    private readonly Color borderColor1 = Color.white;
+    private readonly Color borderColor2 = new Color(0.5f, 0.5f, 0.5f, 1f);
 
     // ブロック存在管理用3D配列 [y][x][z] (0: 非存在, 1: 存在, 2: 削除位置).
     private int[,,] blockState;
@@ -75,6 +88,7 @@ public class GameMaster : Singleton_DestroyAvailableMonoSingleton<GameMaster>
     {
         InitializeGrid();
         InitializePool().Forget();
+        CreateBorderBlocks().Forget();
 
         MainGameLoop().Forget();
     }
@@ -82,14 +96,92 @@ public class GameMaster : Singleton_DestroyAvailableMonoSingleton<GameMaster>
     // グリッド初期化.
     private void InitializeGrid()
     {
-        gridYSize = Mathf.RoundToInt((Y_MAX - Y_MIN) / GRID_SIZE) + 1;
-        gridXZSize = Mathf.RoundToInt((XZ_MAX - XZ_MIN) / GRID_SIZE) + 1;
+        // Vector3Intからグリッドサイズを設定.
+        gridXZSize = gridBlockCount.x;
+        gridYSize = gridBlockCount.y;
+        int gridZSize = gridBlockCount.z;
+
+        // XZは同じサイズを使用（大きい方を採用）.
+        gridXZSize = Mathf.Max(gridXZSize, gridZSize);
+
+        // 範囲を動的に計算（中心を0とする）.
+        float halfXZ = (gridXZSize - 1) * GRID_SIZE / 2f;
+        float halfY = (gridYSize - 1) * GRID_SIZE / 2f;
+
+        XZ_MIN = -halfXZ;
+        XZ_MAX = halfXZ;
+        Y_MIN = -halfY;
+        Y_MAX = halfY;
+
         blockState = new int[gridYSize, gridXZSize, gridXZSize];
         blockObjects = new GameObject[gridYSize, gridXZSize, gridXZSize];
         heightMap = new int[gridXZSize, gridXZSize];
 
         // X-ray vision 深度を上限に初期化.
         xrayDepth = gridYSize;
+    }
+
+    // 境界線ブロックを生成.
+    private async UniTask CreateBorderBlocks()
+    {
+        // プレハブ読み込み完了を待機.
+        await WaitForPrefabLoaded();
+
+        // 境界線の位置は指定範囲の一個分外側.
+        int borderXZMin = -1;
+        int borderXZMax = gridXZSize;
+        int borderYMin = -1;
+
+        // 底面の境界線ブロックを生成（Y=-1の平面）.
+        for (int x = borderXZMin; x <= borderXZMax; x++)
+        {
+            for (int z = borderXZMin; z <= borderXZMax; z++)
+            {
+                CreateBorderBlock(x, borderYMin, z);
+            }
+        }
+
+        // 四方の壁の境界線ブロックを生成.
+        for (int y = 0; y < gridYSize; y++)
+        {
+            // X方向の壁（Z=-1とZ=gridXZSize）.
+            for (int x = borderXZMin; x <= borderXZMax; x++)
+            {
+                CreateBorderBlock(x, y, borderXZMin);
+                CreateBorderBlock(x, y, borderXZMax);
+            }
+            // Z方向の壁（X=-1とX=gridXZSize、角は除く）.
+            for (int z = 0; z < gridXZSize; z++)
+            {
+                CreateBorderBlock(borderXZMin, y, z);
+                CreateBorderBlock(borderXZMax, y, z);
+            }
+        }
+
+        Debug.Log($"境界線ブロック生成完了: {borderBlocks.Count}個");
+    }
+
+    // 境界線ブロックを1つ生成.
+    private void CreateBorderBlock(int gridX, int gridY, int gridZ)
+    {
+        GameObject block = GetBlockFromPool();
+        if (block == null) return;
+
+        // 位置を計算（グリッド外なので直接計算）.
+        float worldX = XZ_MIN + gridX * GRID_SIZE;
+        float worldY = Y_MIN + gridY * GRID_SIZE;
+        float worldZ = XZ_MIN + gridZ * GRID_SIZE;
+        block.transform.position = new Vector3(worldX, worldY, worldZ);
+
+        // 白と灰色のチェッカーパターンで色を設定.
+        Renderer renderer = block.GetComponent<Renderer>();
+        if (renderer != null)
+        {
+            bool isWhite = (gridX + gridY + gridZ) % 2 == 0;
+            renderer.material.color = isWhite ? borderColor1 : borderColor2;
+        }
+
+        borderBlocks.Add(block);
     }
 
     // 前フレームのXrey入力値.
@@ -754,7 +846,7 @@ public class GameMaster : Singleton_DestroyAvailableMonoSingleton<GameMaster>
             MinoManager minoManager = minoObject.AddComponent<MinoManager>();
             // ランダムな形状を設定.
             minoManager.ShapeData = MinoShapeData.GetRandomShape();
-            minoManager.CreateMino(new Vector3(0, 22.5f, 0));
+            minoManager.CreateMino(new Vector3(0, Y_MAX + GRID_SIZE, 0));
             await minoManager.StartFall();
 
             Debug.Log("MainGameLoop: StartFall終了、消去処理開始");
