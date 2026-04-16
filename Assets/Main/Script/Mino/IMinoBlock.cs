@@ -12,11 +12,11 @@ public interface IMinoBlock
     // 位置を更新.
     void UpdatePosition(Vector3 newWorldPosition);
 
-    // GameMasterに位置を登録.
-    void RegisterToGameMaster();
+    // GridManagerに位置を登録.
+    void RegisterToGridManager();
 
-    // GameMasterから位置を解除.
-    void UnregisterFromGameMaster();
+    // GridManagerから位置を解除.
+    void UnregisterFromGridManager();
 
     // 指定方向に移動可能か判定.
     bool CanMove(Vector3 direction);

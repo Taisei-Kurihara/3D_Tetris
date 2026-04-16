@@ -19,10 +19,10 @@ public class Score_View : MonoBehaviour
 
     private void Start()
     {
-        // GameMasterに自身を登録.
-        if (GameMaster.Instance() != null)
+        // GridManagerに自身を登録.
+        if (GridManager.Instance() != null)
         {
-            GameMaster.Instance().SetScoreView(this);
+            GridManager.Instance().SetScoreView(this);
         }
 
         // スコア表示を初期化.

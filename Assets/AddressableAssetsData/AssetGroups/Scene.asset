@@ -10,28 +10,18 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: bbb281ee3bf0b054c82ac2347e9e782c, type: 3}
-  m_Name: obj
+  m_Name: Scene
   m_EditorClassIdentifier: Unity.Addressables.Editor::UnityEditor.AddressableAssets.Settings.AddressableAssetGroup
-  m_GroupName: obj
-  m_GUID: fa59f8c0e3da92247b0dc1566cb3fd98
+  m_GroupName: Scene
+  m_GUID: ead02172316874d459e82e937331a2a5
   m_SerializeEntries:
-  - m_GUID: 516481819b7117f48b6b3c4d0fc990cb
-    m_Address: Load
+  - m_GUID: 9924f1982dd78a44ba3f089f9d68db07
+    m_Address: Title
     m_ReadOnly: 0
     m_SerializedLabels: []
     FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: 9d9baa61a93b01e48934509c27c1a0b9
-    m_Address: Arrow_Straight
-    m_ReadOnly: 0
-    m_SerializedLabels: []
-    FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: ab84ed97a30e0bf47b1503615f13a5f1
-    m_Address: Block
-    m_ReadOnly: 0
-    m_SerializedLabels: []
-    FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: d1ea8368c4c8eba4a9d957c0ae2d3426
-    m_Address: Arrow_Curve
+  - m_GUID: 99c9720ab356a0642a771bea13969a05
+    m_Address: InGame
     m_ReadOnly: 0
     m_SerializedLabels: []
     FlaggedDuringContentUpdateRestriction: 0
@@ -39,5 +29,5 @@ MonoBehaviour:
   m_Settings: {fileID: 11400000, guid: c84ce0c4408f7b34b99d94cdaa6440b5, type: 2}
   m_SchemaSet:
     m_Schemas:
-    - {fileID: 11400000, guid: 449c60252cafe174ba16d31d37d4fe49, type: 2}
-    - {fileID: 11400000, guid: 03706ad1284851a4aa1c9469427c05e6, type: 2}
+    - {fileID: 11400000, guid: 90fdd3deb5b6010418bd72d9cdf73b3c, type: 2}
+    - {fileID: 11400000, guid: 2168cdcc02f2b8a4da5abb73af646ddd, type: 2}

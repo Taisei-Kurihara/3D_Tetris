@@ -56,10 +56,6 @@ public class MinoManager : MonoBehaviour
         set => shapeData = value;
     }
 
-
-    // グリッドサイズ.
-    private const float GRID_SIZE = 5f;
-
     // 落下処理用の時間保存変数.
     private float lastFallTime;
 
@@ -93,6 +89,20 @@ public class MinoManager : MonoBehaviour
     // 移動入力キャンセル用トークン.
     private CancellationTokenSource movementCancellationToken;
     Vector2 movevec = Vector2.zero;
+
+    // GridManagerのキャッシュ参照（OnDestroy時に新規生成を防ぐためフィールドで保持）.
+    private GridManager _gridCache;
+    private GridManager grid
+    {
+        get
+        {
+            if (_gridCache == null)
+            {
+                _gridCache = GridManager.Instance();
+            }
+            return _gridCache;
+        }
+    }
 
     // 落下開始関数.
     public async UniTask StartFall()
@@ -168,7 +178,8 @@ public class MinoManager : MonoBehaviour
     // 落下1ステップの処理（継承クラスでオーバーライド可能）.
     protected virtual void OnFallStep()
     {
-        Vector3 fallDistance = Vector3.down * GRID_SIZE;
+        float cellSize = grid.CellSize;
+        Vector3 fallDistance = Vector3.down * cellSize;
 
         // 自分自身のブロックとの干渉を防ぐため、チェック前に登録解除.
         UnregisterAllBlocks();
@@ -305,13 +316,47 @@ public class MinoManager : MonoBehaviour
 
             movevec = new Vector2(moveX, moveZ);
 
-            // X軸とZ軸方向に移動.
+            // カメラ基準でXZ方向に移動.
             if (vec.x != 0 || vec.y != 0)
             {
-                MoveMino(new Vector3(vec.x, 0, vec.y));
+                Vector3 moveDir = CameraRelativeDirection(vec.x, vec.y);
+                MoveMino(moveDir);
             }
 
             await UniTask.Yield(token);
+        }
+    }
+
+    // 入力をカメラの正面方向基準でワールド方向に変換（グリッド軸にスナップ）.
+    private Vector3 CameraRelativeDirection(float inputX, float inputY)
+    {
+        Camera cam = Camera.main;
+        if (cam == null)
+        {
+            // カメラがない場合はワールド軸直接.
+            return new Vector3(inputX, 0, inputY);
+        }
+
+        // カメラのXZ平面上の前方・右方向を取得.
+        Vector3 camForward = cam.transform.forward;
+        camForward.y = 0f;
+        camForward.Normalize();
+
+        Vector3 camRight = cam.transform.right;
+        camRight.y = 0f;
+        camRight.Normalize();
+
+        // 入力をカメラ基準のワールド方向に合成.
+        Vector3 worldDir = camRight * inputX + camForward * inputY;
+
+        // グリッド軸（±X or ±Z）にスナップ（入力が1軸の場合はその軸、2軸の場合は大きい方）.
+        if (Mathf.Abs(worldDir.x) >= Mathf.Abs(worldDir.z))
+        {
+            return new Vector3(Mathf.Sign(worldDir.x), 0, 0);
+        }
+        else
+        {
+            return new Vector3(0, 0, Mathf.Sign(worldDir.z));
         }
     }
 
@@ -335,28 +380,34 @@ public class MinoManager : MonoBehaviour
     {
         ClearBlocks();
 
+        float cellSize = grid.CellSize;
+
         int sizeY = shapeData.GetSizeY();
         int sizeX = shapeData.GetSizeX();
         int sizeZ = shapeData.GetSizeZ();
 
-        // 偶数サイズの場合、グリッドにスナップするための追加オフセット（2.5）.
-        float snapOffsetX = (sizeX % 2 == 0) ? GRID_SIZE / 2 : 0;
-        float snapOffsetZ = (sizeZ % 2 == 0) ? GRID_SIZE / 2 : 0;
+        // グリッドパリティとミノサイズパリティの両方を考慮したオフセット.
+        // グリッドXZが偶数の場合、中心がグリッド位置にないためオフセットが必要.
+        bool gridEven = grid.IsGridXZEven();
+        // ミノサイズが偶数の場合もオフセットが必要.
+        // 両方のパリティが異なる場合にCellSize/2のオフセットを適用.
+        float snapOffsetX = ((gridEven ? 1 : 0) + (sizeX % 2 == 0 ? 1 : 0)) % 2 == 1 ? cellSize / 2 : 0;
+        float snapOffsetZ = ((gridEven ? 1 : 0) + (sizeZ % 2 == 0 ? 1 : 0)) % 2 == 1 ? cellSize / 2 : 0;
         Vector3 adjustedCenter = centerPosition + new Vector3(snapOffsetX, 0, snapOffsetZ);
 
         // ブロック配置用オフセット計算（X,Zは中央、Yは最下面を基準）.
-        float offsetX = (sizeX - 1) / 2f * GRID_SIZE;
-        float offsetZ = (sizeZ - 1) / 2f * GRID_SIZE;
+        float offsetX = (sizeX - 1) / 2f * cellSize;
+        float offsetZ = (sizeZ - 1) / 2f * cellSize;
 
-        // 回転軸の中心を計算（X,Z は中央+2.5、Y も中央）.
+        // 回転軸の中心を計算（X,Z は中央、Y も中央）.
         Vector3 rotationCenter = adjustedCenter + new Vector3(
-            2.5f,
-            (sizeY - 1) / 2f * GRID_SIZE,
-            2.5f
+            0,
+            (sizeY - 1) / 2f * cellSize,
+            0
         );
         transform.position = rotationCenter;
 
-        
+
         for (int y = 0; y < sizeY; y++)
         {
             for (int x = 0; x < sizeX; x++)
@@ -367,12 +418,12 @@ public class MinoManager : MonoBehaviour
                     {
                         // ブロックのローカル座標を計算（回転中心からの相対位置）.
                         Vector3 localBlockPos = new Vector3(
-                            x * GRID_SIZE - offsetX,
-                            y * GRID_SIZE - (sizeY - 1) / 2f * GRID_SIZE,
-                            z * GRID_SIZE - offsetZ
+                            x * cellSize - offsetX,
+                            y * cellSize - (sizeY - 1) / 2f * cellSize,
+                            z * cellSize - offsetZ
                         );
 
-                        GameObject block = GameMaster.Instance().GetBlockFromPool();
+                        GameObject block = grid.GetBlockFromPool();
                         if (block != null)
                         {
                             block.transform.SetParent(transform);
@@ -586,7 +637,7 @@ public class MinoManager : MonoBehaviour
         {
             if (block != null)
             {
-                GameObject ghostBlock = GameMaster.Instance().GetBlockFromPool();
+                GameObject ghostBlock = grid.GetBlockFromPool();
                 if (ghostBlock != null)
                 {
                     ghostBlock.transform.SetParent(ghostParent.transform);
@@ -600,7 +651,7 @@ public class MinoManager : MonoBehaviour
                         renderer.material.color = GHOST_COLOR;
                     }
 
-                    // MinoBlockPositionがあれば無効化(ゴーストはGameMasterに登録しない).
+                    // MinoBlockPositionがあれば無効化(ゴーストはGridManagerに登録しない).
                     MinoBlockPosition blockPosition = ghostBlock.GetComponent<MinoBlockPosition>();
                     if (blockPosition != null)
                     {
@@ -637,7 +688,7 @@ public class MinoManager : MonoBehaviour
             if (ghostBlock != null)
             {
                 ghostBlock.transform.SetParent(null);
-                GameMaster.Instance().ReturnBlockToPool(ghostBlock);
+                grid.ReturnBlockToPool(ghostBlock);
             }
         }
         ghostBlocks.Clear();
@@ -655,6 +706,8 @@ public class MinoManager : MonoBehaviour
         if (ghostBlocks.Count == 0 || blocks.Count == 0) return;
         if (ghostBlocks.Count != blocks.Count) return;
 
+        float cellSize = grid.CellSize;
+
         // 現在のミノ位置から落下可能な距離を計算.
         int dropDistance = CalculateDropDistance();
 
@@ -664,7 +717,7 @@ public class MinoManager : MonoBehaviour
             if (blocks[i] != null && ghostBlocks[i] != null)
             {
                 Vector3 ghostPos = blocks[i].transform.position;
-                ghostPos.y -= dropDistance * GRID_SIZE;
+                ghostPos.y -= dropDistance * cellSize;
                 ghostBlocks[i].transform.position = ghostPos;
                 ghostBlocks[i].transform.rotation = blocks[i].transform.rotation;
             }
@@ -674,6 +727,10 @@ public class MinoManager : MonoBehaviour
     // 落下可能な距離(グリッド単位)を計算.
     private int CalculateDropDistance()
     {
+        float cellSize = grid.CellSize;
+        int gridXZSize = grid.GridXZSize;
+        int gridYSize = grid.GridYSize;
+
         // ブロック登録を一時解除して判定(自己衝突を防ぐ).
         UnregisterAllBlocks();
 
@@ -683,7 +740,7 @@ public class MinoManager : MonoBehaviour
         // 下方向に移動可能な限り距離を増やす.
         while (true)
         {
-            testOffset = Vector3.down * (distance + 1) * GRID_SIZE;
+            testOffset = Vector3.down * (distance + 1) * cellSize;
 
             bool canMove = true;
             foreach (GameObject block in blocks)
@@ -692,25 +749,25 @@ public class MinoManager : MonoBehaviour
                 {
                     // ブロックの移動先をチェック.
                     Vector3 targetWorldPos = block.transform.position + testOffset;
-                    Vector3Int targetGridIndex = GameMaster.Instance().WorldToGridIndex(targetWorldPos);
+                    Vector3Int targetGridIndex = grid.WorldToGridIndex(targetWorldPos);
 
                     // 範囲外チェック(Y下限とXZ範囲のみ、Y上限は無視).
                     if (targetGridIndex.y < 0 ||
-                        targetGridIndex.x < 0 || targetGridIndex.x >= 10 ||
-                        targetGridIndex.z < 0 || targetGridIndex.z >= 10)
+                        targetGridIndex.x < 0 || targetGridIndex.x >= gridXZSize ||
+                        targetGridIndex.z < 0 || targetGridIndex.z >= gridXZSize)
                     {
                         canMove = false;
                         break;
                     }
 
                     // Y上限を超えている場合は衝突判定をスキップ(上空にブロックはない).
-                    if (targetGridIndex.y >= 6)
+                    if (targetGridIndex.y >= gridYSize)
                     {
                         continue;
                     }
 
                     // 既存ブロックとの衝突判定.
-                    if (GameMaster.Instance().IsBlockExist(targetGridIndex))
+                    if (grid.IsBlockExist(targetGridIndex))
                     {
                         canMove = false;
                         break;
@@ -747,16 +804,16 @@ public class MinoManager : MonoBehaviour
                 MinoBlockPosition blockPosition = block.GetComponent<MinoBlockPosition>();
                 if (blockPosition != null)
                 {
-                    blockPosition.UnregisterFromGameMaster();
+                    blockPosition.UnregisterFromGridManager();
                 }
                 block.transform.SetParent(null);
-                GameMaster.Instance().ReturnBlockToPool(block);
+                grid.ReturnBlockToPool(block);
             }
         }
         blocks.Clear();
     }
 
-    // 全ブロックをGameMasterに登録.
+    // 全ブロックをGridManagerに登録.
     public void RegisterAllBlocks()
     {
         foreach (GameObject block in blocks)
@@ -764,12 +821,12 @@ public class MinoManager : MonoBehaviour
             MinoBlockPosition blockPosition = block.GetComponent<MinoBlockPosition>();
             if (blockPosition != null)
             {
-                blockPosition.RegisterToGameMaster();
+                blockPosition.RegisterToGridManager();
             }
         }
     }
 
-    // 全ブロックをGameMasterから解除.
+    // 全ブロックをGridManagerから解除.
     public void UnregisterAllBlocks()
     {
         foreach (GameObject block in blocks)
@@ -777,7 +834,7 @@ public class MinoManager : MonoBehaviour
             MinoBlockPosition blockPosition = block.GetComponent<MinoBlockPosition>();
             if (blockPosition != null)
             {
-                blockPosition.UnregisterFromGameMaster();
+                blockPosition.UnregisterFromGridManager();
             }
         }
     }
@@ -819,7 +876,7 @@ public class MinoManager : MonoBehaviour
     // 下方向に移動可能か判定(着地状態チェック用).
     public bool CanMoveDown()
     {
-        return CanAllBlocksMove(Vector3.down * GRID_SIZE);
+        return CanAllBlocksMove(Vector3.down * grid.CellSize);
     }
 
     // 着地状態を更新.
@@ -831,13 +888,15 @@ public class MinoManager : MonoBehaviour
     // ゲームオーバー判定(上限を超えているかチェック).
     public bool CheckGameOver()
     {
+        int gridYSize = grid.GridYSize;
+
         // いずれかのブロックのY座標が上限を超えているかチェック(ブロック衝突チェックは行わない).
         foreach (GameObject block in blocks)
         {
             if (block != null)
             {
-                Vector3Int gridPos = GameMaster.Instance().WorldToGridIndex(block.transform.position);
-                if (gridPos.y >= 6)
+                Vector3Int gridPos = grid.WorldToGridIndex(block.transform.position);
+                if (gridPos.y >= gridYSize)
                 {
                     return true;
                 }
@@ -849,7 +908,8 @@ public class MinoManager : MonoBehaviour
     // ミノを移動.
     public void MoveMino(Vector3 direction)
     {
-        Vector3 moveDistance = direction * GRID_SIZE;
+        float cellSize = grid.CellSize;
+        Vector3 moveDistance = direction * cellSize;
 
         // 自分自身のブロックとの干渉を防ぐため、チェック前に登録解除.
         UnregisterAllBlocks();
@@ -890,6 +950,8 @@ public class MinoManager : MonoBehaviour
         if (axis == Vector3.zero) return;
         if (isRotating) return;
 
+        float cellSize = grid.CellSize;
+
         UnregisterAllBlocks();
         float rotationAngle = Mathf.PI / 2 * Mathf.Rad2Deg;
 
@@ -916,7 +978,7 @@ public class MinoManager : MonoBehaviour
         // 回転軸方向に1マス移動して確認.
         if (!rotationSuccess)
         {
-            transform.position = originalPosition + axis.normalized * GRID_SIZE;
+            transform.position = originalPosition + axis.normalized * cellSize;
             if (CanAllBlocksMove(Vector3.zero))
             {
                 rotationSuccess = true;
@@ -928,7 +990,7 @@ public class MinoManager : MonoBehaviour
         // ワールド座標の1マス上に移動して確認.
         if (!rotationSuccess)
         {
-            transform.position = originalPosition + Vector3.up * GRID_SIZE;
+            transform.position = originalPosition + Vector3.up * cellSize;
             if (CanAllBlocksMove(Vector3.zero))
             {
                 rotationSuccess = true;
@@ -940,7 +1002,7 @@ public class MinoManager : MonoBehaviour
         // ワールド座標の1マス下に移動して確認.
         if (!rotationSuccess)
         {
-            transform.position = originalPosition + Vector3.down * GRID_SIZE;
+            transform.position = originalPosition + Vector3.down * cellSize;
             if (CanAllBlocksMove(Vector3.zero))
             {
                 rotationSuccess = true;
@@ -1040,6 +1102,10 @@ public class MinoManager : MonoBehaviour
     private void OnDestroy()
     {
         StopFall();
-        ClearBlocks();
+        // シーン破棄時にGridManager.Instance()で新規生成されるのを防ぐ.
+        if (_gridCache != null)
+        {
+            ClearBlocks();
+        }
     }
 }
