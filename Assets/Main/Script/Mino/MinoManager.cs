@@ -19,8 +19,8 @@ public class MinoManager : MonoBehaviour
     // ゴーストブロックの親オブジェクト.
     private GameObject ghostParent;
 
-    // ゴーストブロックの色(水色、高透明度).
-    private static readonly Color GHOST_COLOR = new Color(0f, 1f, 1f, 0.2f);
+    // ゴーストブロックの色(水色、半透明).
+    private static readonly Color GHOST_COLOR = new Color(0f, 1f, 1f, 0.3f);
 
     // 回転方向矢印オブジェクト(X軸:赤, Y軸:緑, Z軸:青).
     private GameObject arrowX;
@@ -398,6 +398,10 @@ public class MinoManager : MonoBehaviour
         // ブロック配置用オフセット計算（X,Zは中央、Yは最下面を基準）.
         float offsetX = (sizeX - 1) / 2f * cellSize;
         float offsetZ = (sizeZ - 1) / 2f * cellSize;
+
+        // スポーン位置がグリッド範囲外にならないようにクランプ.
+        adjustedCenter.x = Mathf.Clamp(adjustedCenter.x, grid.XZMin + offsetX, grid.XZMax - offsetX);
+        adjustedCenter.z = Mathf.Clamp(adjustedCenter.z, grid.XZMin + offsetZ, grid.XZMax - offsetZ);
 
         // 回転軸の中心を計算（X,Z は中央、Y も中央）.
         Vector3 rotationCenter = adjustedCenter + new Vector3(

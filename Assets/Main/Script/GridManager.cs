@@ -50,6 +50,27 @@ public class GridManager : Singleton_DestroyAvailableMonoSingleton<GridManager>
     private readonly Color borderColor1 = Color.white;
     private readonly Color borderColor2 = new Color(0.5f, 0.5f, 0.5f, 1f);
 
+    // 床の内端ブロックの色（配置可能範囲の境界を示す濃いグレー）.
+    private readonly Color floorInnerEdgeColor = new Color(0.25f, 0.25f, 0.25f, 1f);
+
+    // 壁面の法線方向（+X, -X, +Z, -Z）.
+    private static readonly Vector3[] wallNormals = {
+        Vector3.right,   // index 0: +X壁.
+        Vector3.left,    // index 1: -X壁.
+        Vector3.forward, // index 2: +Z壁.
+        Vector3.back     // index 3: -Z壁.
+    };
+
+    // 壁面ごとのRendererリスト（4面）.
+    private List<Renderer>[] wallRenderers;
+
+    // カメラ正面の壁の最小α値.
+    [SerializeField]
+    private float wallNearTransparentAlpha = 0.05f;
+
+    // 角ブロックとその隣接ブロック（斜め方向からの透明度補正用）.
+    private HashSet<Renderer> cornerAdjacentRenderers = new HashSet<Renderer>();
+
     // ブロック存在管理用3D配列 [y][x][z] (0: 非存在, 1: 存在, 2: 削除位置).
     private int[,,] blockState;
 
@@ -113,6 +134,98 @@ public class GridManager : Singleton_DestroyAvailableMonoSingleton<GridManager>
         CreateBorderBlocks().Forget();
     }
 
+    private void LateUpdate()
+    {
+        UpdateWallTransparency();
+    }
+
+    // カメラ方向に応じて壁面の透明度を更新.
+    private void UpdateWallTransparency()
+    {
+        if (wallRenderers == null) return;
+
+        Camera cam = Camera.main;
+        if (cam == null) return;
+
+        // カメラからGridCenterへの方向（XZ平面）.
+        Vector3 dirToCamera = cam.transform.position - GridCenter;
+        dirToCamera.y = 0f;
+        if (dirToCamera.sqrMagnitude < 0.001f) return;
+        dirToCamera.Normalize();
+
+        // 各壁面のα値を計算（facingFactor: 内積 -1〜1）.
+        // 0°=1.0, 15°=0.1, 45°=wallNearTransparentAlpha の区間補間.
+        const float FACTOR_15DEG = 0.2588f; // sin(15°).
+        const float FACTOR_45DEG = 0.7071f; // sin(45°).
+        const float ALPHA_AT_15DEG = 0.1f;
+
+        float[] faceAlphas = new float[4];
+        for (int i = 0; i < 4; i++)
+        {
+            float f = Vector3.Dot(wallNormals[i], dirToCamera);
+
+            if (f <= 0f)
+            {
+                faceAlphas[i] = 1f;
+            }
+            else if (f <= FACTOR_15DEG)
+            {
+                // 0° → 15°: α 1.0 → 0.1.
+                faceAlphas[i] = Mathf.Lerp(1f, ALPHA_AT_15DEG, f / FACTOR_15DEG);
+            }
+            else if (f <= FACTOR_45DEG)
+            {
+                // 15° → 45°: α 0.1 → wallNearTransparentAlpha.
+                faceAlphas[i] = Mathf.Lerp(ALPHA_AT_15DEG, wallNearTransparentAlpha,
+                    (f - FACTOR_15DEG) / (FACTOR_45DEG - FACTOR_15DEG));
+            }
+            else
+            {
+                // 45° → 90°: 最小値で固定.
+                faceAlphas[i] = wallNearTransparentAlpha;
+            }
+        }
+
+        // α値降順（不透明→透明）でソートしたインデックス.
+        // 角ブロックは2面に所属するため、透明な方で上書きされるようにする.
+        int[] sortedIndices = { 0, 1, 2, 3 };
+        System.Array.Sort(sortedIndices, (a, b) => faceAlphas[b].CompareTo(faceAlphas[a]));
+
+        // 不透明な面から順に適用（角ブロックは後の透明な面で上書き）.
+        for (int si = 0; si < 4; si++)
+        {
+            int faceIndex = sortedIndices[si];
+            float alpha = faceAlphas[faceIndex];
+
+            foreach (Renderer renderer in wallRenderers[faceIndex])
+            {
+                if (renderer == null) continue;
+                SetBlockAlpha(renderer, alpha);
+            }
+        }
+
+        // 斜め方向から見ているとき、角ブロックと隣接ブロックの透明度を補正.
+        // 2番目に大きいfacingFactorが正なら斜め方向と判定.
+        float[] factors = new float[4];
+        for (int i = 0; i < 4; i++)
+        {
+            factors[i] = Vector3.Dot(wallNormals[i], dirToCamera);
+        }
+        System.Array.Sort(factors);
+        float secondHighest = factors[2];
+
+        if (secondHighest > 0.1f)
+        {
+            foreach (Renderer renderer in cornerAdjacentRenderers)
+            {
+                if (renderer == null) continue;
+                Color color = renderer.material.color;
+                color.a = Mathf.Max(wallNearTransparentAlpha, color.a - 0.1f);
+                renderer.material.color = color;
+            }
+        }
+    }
+
     // グリッド初期化.
     public void InitializeGrid()
     {
@@ -158,11 +271,24 @@ public class GridManager : Singleton_DestroyAvailableMonoSingleton<GridManager>
         return gridXZSize % 2 == 0;
     }
 
+    // 指定サイズのミノがグリッドXZ範囲内に収まるか判定.
+    public bool CanMinoFit(int minoSizeX, int minoSizeZ)
+    {
+        return minoSizeX <= gridXZSize && minoSizeZ <= gridXZSize;
+    }
+
     // 境界線ブロックを生成.
     private async UniTask CreateBorderBlocks()
     {
         // プレハブ読み込み完了を待機.
         await WaitForPrefabLoaded();
+
+        // 壁面Rendererリストを初期化.
+        wallRenderers = new List<Renderer>[4];
+        for (int i = 0; i < 4; i++)
+        {
+            wallRenderers[i] = new List<Renderer>();
+        }
 
         // 境界線の位置は指定範囲の一個分外側.
         int borderXZMin = -1;
@@ -210,12 +336,46 @@ public class GridManager : Singleton_DestroyAvailableMonoSingleton<GridManager>
         float worldZ = xzMin + gridZ * GRID_SIZE;
         block.transform.position = new Vector3(worldX, worldY, worldZ);
 
-        // 白と灰色のチェッカーパターンで色を設定.
+        // ブロックの色を設定.
         Renderer renderer = block.GetComponent<Renderer>();
         if (renderer != null)
         {
-            bool isWhite = (gridX + gridY + gridZ) % 2 == 0;
-            renderer.material.color = isWhite ? borderColor1 : borderColor2;
+            // 床の壁直下（壁の真下の1列）を濃いグレーで強調.
+            bool isFloorWallBase = (gridY == -1)
+                && (gridX == -1 || gridX == gridXZSize || gridZ == -1 || gridZ == gridXZSize);
+
+            if (isFloorWallBase)
+            {
+                renderer.material.color = floorInnerEdgeColor;
+            }
+            else
+            {
+                // 白と灰色のチェッカーパターン.
+                bool isWhite = (gridX + gridY + gridZ) % 2 == 0;
+                renderer.material.color = isWhite ? borderColor1 : borderColor2;
+            }
+
+            // 壁ブロック（床以外）を壁面ごとのリストに分類.
+            int borderXZMinVal = -1;
+            int borderXZMaxVal = gridXZSize;
+            if (gridY >= 0)
+            {
+                if (gridX == borderXZMaxVal) wallRenderers[0].Add(renderer); // +X壁.
+                if (gridX == borderXZMinVal) wallRenderers[1].Add(renderer); // -X壁.
+                if (gridZ == borderXZMaxVal) wallRenderers[2].Add(renderer); // +Z壁.
+                if (gridZ == borderXZMinVal) wallRenderers[3].Add(renderer); // -Z壁.
+
+                // 角ブロックまたは角に隣接するブロックを記録.
+                bool xAtEdge = (gridX == borderXZMinVal || gridX == borderXZMaxVal);
+                bool zAtEdge = (gridZ == borderXZMinVal || gridZ == borderXZMaxVal);
+                bool xNearEdge = (gridX == borderXZMinVal + 1 || gridX == borderXZMaxVal - 1);
+                bool zNearEdge = (gridZ == borderXZMinVal + 1 || gridZ == borderXZMaxVal - 1);
+
+                if ((xAtEdge && zAtEdge) || (xAtEdge && zNearEdge) || (zAtEdge && xNearEdge))
+                {
+                    cornerAdjacentRenderers.Add(renderer);
+                }
+            }
         }
 
         borderBlocks.Add(block);

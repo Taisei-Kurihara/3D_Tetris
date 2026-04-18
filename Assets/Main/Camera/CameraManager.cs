@@ -25,9 +25,13 @@ public class CameraManager : MonoBehaviour
     [SerializeField]
     private float verticalAngleMin = 25f;
 
-    // 回転速度.
+    // マウス回転速度.
     [SerializeField]
-    private float rotationSpeed = 50f;
+    private float mouseRotationSpeed = 50f;
+
+    // コントローラ回転速度.
+    [SerializeField]
+    private float controllerRotationSpeed = 150f;
 
     // 入力システム.
     private InputSystem_Actions action;
@@ -54,14 +58,38 @@ public class CameraManager : MonoBehaviour
         // InputSystemのLookアクションから入力を取得.
         if (action != null)
         {
-            rotationInput = action.Player.Look.ReadValue<Vector2>();
+            var lookAction = action.Player.Look;
+            rotationInput = lookAction.ReadValue<Vector2>();
+
+            // マウス入力の場合は左クリック中のみ有効（コントローラーは制限なし）.
+            if (rotationInput.sqrMagnitude > 0.001f)
+            {
+                var activeControl = lookAction.activeControl;
+                bool isMouseInput = activeControl != null && activeControl.device is Mouse;
+                if (isMouseInput && !Mouse.current.leftButton.isPressed)
+                {
+                    rotationInput = Vector2.zero;
+                }
+            }
+        }
+
+        // 入力デバイスに応じた回転速度を選択.
+        float speed = mouseRotationSpeed;
+        if (action != null)
+        {
+            var activeControl = action.Player.Look.activeControl;
+            bool isMouse = activeControl != null && activeControl.device is Mouse;
+            if (!isMouse)
+            {
+                speed = controllerRotationSpeed;
+            }
         }
 
         // 水平回転(左右).
-        horizontalAngle += rotationInput.x * rotationSpeed * Time.deltaTime;
+        horizontalAngle += rotationInput.x * speed * Time.deltaTime;
 
         // 垂直回転(上下、反転).
-        verticalAngle -= rotationInput.y * rotationSpeed * Time.deltaTime;
+        verticalAngle -= rotationInput.y * speed * Time.deltaTime;
 
         // 垂直角度を制限(25度〜45度).
         verticalAngle = Mathf.Clamp(verticalAngle, verticalAngleMin, verticalAngleMax);

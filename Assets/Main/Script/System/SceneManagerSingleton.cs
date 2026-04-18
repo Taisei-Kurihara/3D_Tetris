@@ -59,6 +59,12 @@ public class SceneManagerSingleton : Singleton_MonoBehaviourBase<SceneManagerSin
 
     private async UniTask LoadSceneAsync(UseScene scene)
     {
+        Debug.Log("[SceneManager] LoadSceneAsync 開始");
+
+        // CanvasManager初期化待機.
+        var canvasManager = CanvasManager.Instance();
+        Debug.Log($"[SceneManager] CanvasManager取得: {canvasManager != null}");
+
         // フェードプレハブをロード（Addressablesに"Load"キーで登録されている場合）.
         GameObject fadeObj = null;
         LoadScene_interface loadScene = null;
@@ -68,14 +74,35 @@ public class SceneManagerSingleton : Singleton_MonoBehaviourBase<SceneManagerSin
             // キーの存在チェック.
             var locHandle = Addressables.LoadResourceLocationsAsync("Load");
             await locHandle.Task;
+            Debug.Log($"[SceneManager] 'Load'キー検索結果: count={locHandle.Result?.Count ?? 0}");
             if (locHandle.Result != null && locHandle.Result.Count > 0)
             {
                 var fadeHandle = Addressables.InstantiateAsync("Load");
                 await fadeHandle.Task;
                 fadeObj = fadeHandle.Result;
-                fadeObj.transform.SetParent(transform);
-                fadeObj.transform.localPosition = Vector3.zero;
+                Debug.Log($"[SceneManager] fadeObj生成: {fadeObj.name}, components={string.Join(", ", System.Array.ConvertAll(fadeObj.GetComponents<Component>(), c => c.GetType().Name))}");
+
+                // Canvas配下に親子付け（UIとして正しく表示するため）.
+                await canvasManager.AttachToCanvas(fadeObj, 100);
+                Debug.Log($"[SceneManager] Canvas親子付け完了: parent={fadeObj.transform.parent?.name}");
+
+                // RectTransformを画面全体に拡張.
+                RectTransform rt = fadeObj.GetComponent<RectTransform>();
+                if (rt != null)
+                {
+                    rt.anchorMin = Vector2.zero;
+                    rt.anchorMax = Vector2.one;
+                    rt.offsetMin = Vector2.zero;
+                    rt.offsetMax = Vector2.zero;
+                    Debug.Log($"[SceneManager] RectTransform設定完了: size={rt.rect.size}");
+                }
+                else
+                {
+                    Debug.LogWarning("[SceneManager] fadeObjにRectTransformがありません.");
+                }
+
                 loadScene = fadeObj.GetComponent<LoadScene_interface>();
+                Debug.Log($"[SceneManager] LoadScene_interface取得: {loadScene != null}, 型={loadScene?.GetType().Name}");
             }
             Addressables.Release(locHandle);
         }
@@ -85,7 +112,9 @@ public class SceneManagerSingleton : Singleton_MonoBehaviourBase<SceneManagerSin
         }
 
         // フェードイン開始.
+        Debug.Log($"[SceneManager] フェードイン開始前: loadScene={loadScene != null}");
         if (loadScene != null) await loadScene.StartFadeIn();
+        Debug.Log("[SceneManager] フェードイン完了");
 
         // シーンロード.
         string sceneName = scene.ToString();
@@ -121,6 +150,7 @@ public class SceneManagerSingleton : Singleton_MonoBehaviourBase<SceneManagerSin
             else
             {
                 Addressables.Release(locHandle);
+                Debug.Log($"[SceneManager] Addressablesロードを使用: {sceneName}");
                 var sceneHandle = Addressables.LoadSceneAsync(sceneName, LoadSceneMode.Single);
                 await sceneHandle.Task;
             }
@@ -131,11 +161,18 @@ public class SceneManagerSingleton : Singleton_MonoBehaviourBase<SceneManagerSin
             throw;
         }
 
+        Debug.Log($"[SceneManager] シーンロード完了: activeScene={SceneManager.GetActiveScene().name}");
+
         // フェードアウト開始.
+        Debug.Log($"[SceneManager] フェードアウト開始前: loadScene={loadScene != null}, fadeObj={fadeObj != null}, fadeObj.destroyed={fadeObj == null}");
         if (loadScene != null)
         {
+            Debug.Log($"[SceneManager] フェードアウト開始: fadeObj.active={fadeObj?.activeSelf}, fadeObj.parent={fadeObj?.transform.parent?.name}");
             await loadScene.StartFadeOut();
+            Debug.Log("[SceneManager] フェードアウト完了、fadeObj破棄");
             GameObject.Destroy(fadeObj);
         }
+
+        Debug.Log("[SceneManager] LoadSceneAsync 完了");
     }
 }

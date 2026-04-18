@@ -1,5 +1,6 @@
 using Common;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 // グリッド中心を周回するカメラ制御.
 public class CameraController : MonoBehaviour
@@ -57,6 +58,8 @@ public class CameraController : MonoBehaviour
     private void LateUpdate()
     {
         if (!isInitialized || action == null) return;
+
+        
 
         // Player.Look入力を取得.
         Vector2 lookInput = action.Player.Look.ReadValue<Vector2>();

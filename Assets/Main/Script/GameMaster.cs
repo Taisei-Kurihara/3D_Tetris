@@ -77,11 +77,21 @@ public class GameMaster : Singleton_DestroyAvailableMonoSingleton<GameMaster>
         {
             GameObject minoObject = new GameObject("Mino");
             MinoManager minoManager = minoObject.AddComponent<MinoManager>();
-            // ランダムな形状を設定.
-            minoManager.ShapeData = MinoShapeData.GetRandomShape();
+
+            // グリッドに収まる形状が出るまで再抽選.
+            var gridMgr = GridManager.Instance();
+            const int MAX_REROLL = 10;
+            for (int i = 0; i < MAX_REROLL; i++)
+            {
+                minoManager.ShapeData = MinoShapeData.GetRandomShape();
+                if (gridMgr.CanMinoFit(minoManager.ShapeData.GetSizeX(), minoManager.ShapeData.GetSizeZ()))
+                    break;
+                if (i == MAX_REROLL - 1)
+                    Debug.LogWarning("[GameMaster] グリッドに収まるミノが見つかりません. 最後の形状を使用.");
+            }
 
             // GridManagerからスポーン位置を取得.
-            Vector3 spawnPos = GridManager.Instance().GetMinoSpawnPosition();
+            Vector3 spawnPos = gridMgr.GetMinoSpawnPosition();
             minoManager.CreateMino(spawnPos);
             await minoManager.StartFall();
 
