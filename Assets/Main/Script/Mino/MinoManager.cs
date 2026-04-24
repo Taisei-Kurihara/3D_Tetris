@@ -545,52 +545,52 @@ public class MinoManager : MonoBehaviour
     // 矢印の位置と向きを更新.
     private void UpdateArrowPositions()
     {
-        if (arrowParent == null) return;
+        //if (arrowParent == null) return;
 
-        // 矢印の親をミノに追従させる.
-        arrowParent.transform.position = transform.position;
+        //// 矢印の親をミノに追従させる.
+        //arrowParent.transform.position = transform.position;
 
-        // 各軸の回転方向に矢印を配置(Arrow_Curve).
-        if (arrowX != null)
-        {
-            // X軸回転(赤).
-            arrowX.transform.localPosition = new Vector3(0f, 9.6f, -6.8f);
-            arrowX.transform.localRotation = Quaternion.Euler(-135f, 0f, 90f);
-            arrowX.transform.localScale = new Vector3(150f, 150f, 150f);
-        }
+        //// 各軸の回転方向に矢印を配置(Arrow_Curve).
+        //if (arrowX != null)
+        //{
+        //    // X軸回転(赤).
+        //    arrowX.transform.localPosition = new Vector3(0f, 9.6f, -6.8f);
+        //    arrowX.transform.localRotation = Quaternion.Euler(-135f, 0f, 90f);
+        //    arrowX.transform.localScale = new Vector3(150f, 150f, 150f);
+        //}
 
-        if (arrowY != null)
-        {
-            // Y軸回転(緑).
-            arrowY.transform.localPosition = new Vector3(10f, 0f, 10f);
-            arrowY.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
-            arrowY.transform.localScale = new Vector3(150f, 150f, 150f);
-        }
+        //if (arrowY != null)
+        //{
+        //    // Y軸回転(緑).
+        //    arrowY.transform.localPosition = new Vector3(10f, 0f, 10f);
+        //    arrowY.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
+        //    arrowY.transform.localScale = new Vector3(150f, 150f, 150f);
+        //}
 
-        if (arrowZ != null)
-        {
-            // Z軸回転(青).
-            arrowZ.transform.localPosition = new Vector3(6.8f, 9.6f, 0f);
-            arrowZ.transform.localRotation = Quaternion.Euler(-45f, 90f, -90f);
-            arrowZ.transform.localScale = new Vector3(150f, 150f, 150f);
-        }
+        //if (arrowZ != null)
+        //{
+        //    // Z軸回転(青).
+        //    arrowZ.transform.localPosition = new Vector3(6.8f, 9.6f, 0f);
+        //    arrowZ.transform.localRotation = Quaternion.Euler(-45f, 90f, -90f);
+        //    arrowZ.transform.localScale = new Vector3(150f, 150f, 150f);
+        //}
 
-        // 移動方向矢印を配置(Arrow_Straight).
-        if (moveArrowX != null)
-        {
-            // X軸移動(赤).
-            moveArrowX.transform.localPosition = new Vector3(10f, 0f, 0f);
-            moveArrowX.transform.localRotation = Quaternion.Euler(0f, 0f, 0f);
-            moveArrowX.transform.localScale = new Vector3(200f, 200f, 200f);
-        }
+        //// 移動方向矢印を配置(Arrow_Straight).
+        //if (moveArrowX != null)
+        //{
+        //    // X軸移動(赤).
+        //    moveArrowX.transform.localPosition = new Vector3(10f, 0f, 0f);
+        //    moveArrowX.transform.localRotation = Quaternion.Euler(0f, 0f, 0f);
+        //    moveArrowX.transform.localScale = new Vector3(200f, 200f, 200f);
+        //}
 
-        if (moveArrowZ != null)
-        {
-            // Z軸移動(青).
-            moveArrowZ.transform.localPosition = new Vector3(0f, 0f, 10f);
-            moveArrowZ.transform.localRotation = Quaternion.Euler(0f, -90f, 0f);
-            moveArrowZ.transform.localScale = new Vector3(200f, 200f, 200f);
-        }
+        //if (moveArrowZ != null)
+        //{
+        //    // Z軸移動(青).
+        //    moveArrowZ.transform.localPosition = new Vector3(0f, 0f, 10f);
+        //    moveArrowZ.transform.localRotation = Quaternion.Euler(0f, -90f, 0f);
+        //    moveArrowZ.transform.localScale = new Vector3(200f, 200f, 200f);
+        //}
     }
 
     // 回転方向矢印をクリア.

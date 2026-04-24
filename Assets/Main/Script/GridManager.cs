@@ -71,6 +71,27 @@ public class GridManager : Singleton_DestroyAvailableMonoSingleton<GridManager>
     // 角ブロックとその隣接ブロック（斜め方向からの透明度補正用）.
     private HashSet<Renderer> cornerAdjacentRenderers = new HashSet<Renderer>();
 
+    // レイキャスト遮蔽透明化用.
+    private Dictionary<Collider, Vector3Int> wallColliderToGrid = new Dictionary<Collider, Vector3Int>();
+    private Dictionary<Vector3Int, Renderer> wallBlockRenderers = new Dictionary<Vector3Int, Renderer>();
+    private List<(Vector3 position, Collider collider)>[] floorEdgeBlocks; // 4辺: +X, -X, +Z, -Z.
+    private RaycastHit[] raycastHitBuffer = new RaycastHit[16];
+    private HashSet<Vector3Int> raycastTransparentSet = new HashSet<Vector3Int>();
+    private HashSet<Vector3Int> faceCandidateSet = new HashSet<Vector3Int>();
+
+    // レイキャスト発射位置: ブロックの8角.
+    private const float CORNER_HALF = GRID_SIZE * 0.5f - 0.1f;
+    private static readonly Vector3[] blockCornerOffsets = {
+        new Vector3(-CORNER_HALF, -CORNER_HALF, -CORNER_HALF),
+        new Vector3(-CORNER_HALF, -CORNER_HALF,  CORNER_HALF),
+        new Vector3(-CORNER_HALF,  CORNER_HALF, -CORNER_HALF),
+        new Vector3(-CORNER_HALF,  CORNER_HALF,  CORNER_HALF),
+        new Vector3( CORNER_HALF, -CORNER_HALF, -CORNER_HALF),
+        new Vector3( CORNER_HALF, -CORNER_HALF,  CORNER_HALF),
+        new Vector3( CORNER_HALF,  CORNER_HALF, -CORNER_HALF),
+        new Vector3( CORNER_HALF,  CORNER_HALF,  CORNER_HALF),
+    };
+
     // ブロック存在管理用3D配列 [y][x][z] (0: 非存在, 1: 存在, 2: 削除位置).
     private int[,,] blockState;
 
@@ -186,26 +207,31 @@ public class GridManager : Singleton_DestroyAvailableMonoSingleton<GridManager>
             }
         }
 
-        // α値降順（不透明→透明）でソートしたインデックス.
-        // 角ブロックは2面に所属するため、透明な方で上書きされるようにする.
-        int[] sortedIndices = { 0, 1, 2, 3 };
-        System.Array.Sort(sortedIndices, (a, b) => faceAlphas[b].CompareTo(faceAlphas[a]));
-
-        // 不透明な面から順に適用（角ブロックは後の透明な面で上書き）.
-        for (int si = 0; si < 4; si++)
+        // まず全壁ブロックを不透明に設定.
+        for (int i = 0; i < 4; i++)
         {
-            int faceIndex = sortedIndices[si];
-            float alpha = faceAlphas[faceIndex];
-
-            foreach (Renderer renderer in wallRenderers[faceIndex])
+            foreach (Renderer renderer in wallRenderers[i])
             {
                 if (renderer == null) continue;
-                SetBlockAlpha(renderer, alpha);
+                SetBlockAlpha(renderer, 1f);
             }
         }
 
-        // 斜め方向から見ているとき、角ブロックと隣接ブロックの透明度を補正.
-        // 2番目に大きいfacingFactorが正なら斜め方向と判定.
+        // 面ベース透明化の候補セットを構築（面α < 1のブロック）.
+        faceCandidateSet.Clear();
+        foreach (var kvp in wallBlockRenderers)
+        {
+            float alpha = GetBlockFaceAlpha(kvp.Key, faceAlphas);
+            if (alpha < 1f)
+            {
+                faceCandidateSet.Add(kvp.Key);
+            }
+        }
+
+        // レイキャストで遮蔽確認された候補のみ透明化.
+        UpdateRaycastTransparency(cam.transform.position, faceAlphas);
+
+        // 斜め方向から見ているとき、確認済み透明ブロックのうち角付近のものを補正.
         float[] factors = new float[4];
         for (int i = 0; i < 4; i++)
         {
@@ -220,10 +246,122 @@ public class GridManager : Singleton_DestroyAvailableMonoSingleton<GridManager>
             {
                 if (renderer == null) continue;
                 Color color = renderer.material.color;
+                if (color.a >= 1f) continue; // レイキャスト未確認のブロックはスキップ.
                 color.a = Mathf.Max(wallNearTransparentAlpha, color.a - 0.1f);
                 renderer.material.color = color;
             }
         }
+    }
+
+    // レイキャストで遮蔽確認された面ベース候補のみ透明化.
+    private void UpdateRaycastTransparency(Vector3 camPos, float[] faceAlphas)
+    {
+        raycastTransparentSet.Clear();
+
+        // カメラから最も遠い角を特定.
+        Vector3 dirFromCenter = camPos - GridCenter;
+        int farCornerX = dirFromCenter.x > 0 ? -1 : gridXZSize;
+        int farCornerZ = dirFromCenter.z > 0 ? -1 : gridXZSize;
+
+        // 非候補の壁ブロック（不透明）からカメラへレイキャスト（1列おきにスキップ）.
+        foreach (var kvp in wallColliderToGrid)
+        {
+            Collider col = kvp.Key;
+            Vector3Int gp = kvp.Value;
+            if (col == null) continue;
+
+            // 最も遠い角の列はスキップ.
+            if (gp.x == farCornerX && gp.z == farCornerZ) continue;
+
+            // 候補ブロックはレイキャスト元にしない（不透明ブロックからのみ発射）.
+            if (faceCandidateSet.Contains(gp)) continue;
+
+            // 1列判定したら次の列をスキップ（列の偶奇で交互）.
+            if (((gp.x + gp.z) & 1) != 0) continue;
+
+            CastAndCollect(col.transform.position, col, gp, camPos);
+        }
+
+        // カメラ方向の上位2面を特定.
+        int[] faceOrder = { 0, 1, 2, 3 };
+        System.Array.Sort(faceOrder, (a, b) =>
+            Vector3.Dot(wallNormals[b], dirFromCenter.normalized).CompareTo(
+            Vector3.Dot(wallNormals[a], dirFromCenter.normalized)));
+        int topFace1 = faceOrder[0];
+        int topFace2 = faceOrder[1];
+
+        // 内縁の床ブロックからカメラへレイキャスト（カメラ方向の面+次の面のみ）.
+        Vector3Int dummyFloorPos = new Vector3Int(int.MinValue, int.MinValue, int.MinValue);
+        foreach (var fb in floorEdgeBlocks[topFace1])
+        {
+            CastAndCollect(fb.position, fb.collider, dummyFloorPos, camPos);
+        }
+        foreach (var fb in floorEdgeBlocks[topFace2])
+        {
+            CastAndCollect(fb.position, fb.collider, dummyFloorPos, camPos);
+        }
+
+        // 確認された候補ブロックに面ベースα値を適用.
+        foreach (Vector3Int pos in raycastTransparentSet)
+        {
+            if (wallBlockRenderers.TryGetValue(pos, out Renderer rend) && rend != null)
+            {
+                float alpha = GetBlockFaceAlpha(pos, faceAlphas);
+                SetBlockAlpha(rend, alpha);
+            }
+        }
+    }
+
+    // ブロックの8角からレイキャストし遮蔽壁ブロックを収集（候補かつ同列以外のみ）.
+    private void CastAndCollect(Vector3 blockCenter, Collider sourceCollider, Vector3Int sourceGridPos, Vector3 camPos)
+    {
+        for (int c = 0; c < blockCornerOffsets.Length; c++)
+        {
+            Vector3 origin = blockCenter + blockCornerOffsets[c];
+            Vector3 dir = camPos - origin;
+            float dist = dir.magnitude;
+            if (dist < 0.1f) continue;
+            dir /= dist;
+
+            int hitCount = Physics.RaycastNonAlloc(origin, dir, raycastHitBuffer, dist);
+            for (int i = 0; i < hitCount; i++)
+            {
+                Collider hitCol = raycastHitBuffer[i].collider;
+                if (hitCol == sourceCollider) continue; // 自身をスキップ.
+
+                if (wallColliderToGrid.TryGetValue(hitCol, out Vector3Int gridPos))
+                {
+                    // 同列は無視（自身の上にいるブロックは透明化しない）.
+                    if (gridPos.x == sourceGridPos.x && gridPos.z == sourceGridPos.z) continue;
+
+                    // 面ベース候補のみ透明化対象.
+                    if (faceCandidateSet.Contains(gridPos))
+                    {
+                        raycastTransparentSet.Add(gridPos);
+                    }
+                    // 同じ列のそれより上のブロックも候補であれば透明化.
+                    for (int y = gridPos.y + 1; y < gridYSize; y++)
+                    {
+                        Vector3Int above = new Vector3Int(gridPos.x, y, gridPos.z);
+                        if (faceCandidateSet.Contains(above))
+                        {
+                            raycastTransparentSet.Add(above);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 壁ブロックの面ベースα値を取得（複数面に所属する場合は最小値）.
+    private float GetBlockFaceAlpha(Vector3Int gridPos, float[] faceAlphas)
+    {
+        float alpha = 1f;
+        if (gridPos.x == gridXZSize) alpha = Mathf.Min(alpha, faceAlphas[0]); // +X壁.
+        if (gridPos.x == -1) alpha = Mathf.Min(alpha, faceAlphas[1]);         // -X壁.
+        if (gridPos.z == gridXZSize) alpha = Mathf.Min(alpha, faceAlphas[2]); // +Z壁.
+        if (gridPos.z == -1) alpha = Mathf.Min(alpha, faceAlphas[3]);         // -Z壁.
+        return alpha;
     }
 
     // グリッド初期化.
@@ -285,9 +423,11 @@ public class GridManager : Singleton_DestroyAvailableMonoSingleton<GridManager>
 
         // 壁面Rendererリストを初期化.
         wallRenderers = new List<Renderer>[4];
+        floorEdgeBlocks = new List<(Vector3, Collider)>[4];
         for (int i = 0; i < 4; i++)
         {
             wallRenderers[i] = new List<Renderer>();
+            floorEdgeBlocks[i] = new List<(Vector3, Collider)>();
         }
 
         // 境界線の位置は指定範囲の一個分外側.
@@ -374,6 +514,32 @@ public class GridManager : Singleton_DestroyAvailableMonoSingleton<GridManager>
                 if ((xAtEdge && zAtEdge) || (xAtEdge && zNearEdge) || (zAtEdge && xNearEdge))
                 {
                     cornerAdjacentRenderers.Add(renderer);
+                }
+
+                // レイキャスト用にColliderとグリッド位置を記録.
+                Collider col = block.GetComponent<Collider>();
+                if (col != null)
+                {
+                    Vector3Int gridPos = new Vector3Int(gridX, gridY, gridZ);
+                    wallColliderToGrid[col] = gridPos;
+                    wallBlockRenderers[gridPos] = renderer;
+                }
+            }
+            else if (gridY == -1 && gridX >= 0 && gridX < gridXZSize && gridZ >= 0 && gridZ < gridXZSize)
+            {
+                // 内縁の床ブロックを辺ごとに分類（レイキャスト用）.
+                bool isEdge = (gridX == 0 || gridX == gridXZSize - 1 || gridZ == 0 || gridZ == gridXZSize - 1);
+                if (isEdge)
+                {
+                    Collider floorCol = block.GetComponent<Collider>();
+                    if (floorCol != null)
+                    {
+                        var entry = (block.transform.position, floorCol);
+                        if (gridX == gridXZSize - 1) floorEdgeBlocks[0].Add(entry); // +X辺.
+                        if (gridX == 0)              floorEdgeBlocks[1].Add(entry); // -X辺.
+                        if (gridZ == gridXZSize - 1) floorEdgeBlocks[2].Add(entry); // +Z辺.
+                        if (gridZ == 0)              floorEdgeBlocks[3].Add(entry); // -Z辺.
+                    }
                 }
             }
         }

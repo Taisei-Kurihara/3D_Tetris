@@ -116,41 +116,21 @@ public class SceneManagerSingleton : Singleton_MonoBehaviourBase<SceneManagerSin
         if (loadScene != null) await loadScene.StartFadeIn();
         Debug.Log("[SceneManager] フェードイン完了");
 
-        // シーンロード.
+        // シーンロード（AssetBundle重複回避のため標準SceneManagerを優先）.
         string sceneName = scene.ToString();
         try
         {
-            // キーの存在チェック.
-            var locHandle = Addressables.LoadResourceLocationsAsync(sceneName);
-            await locHandle.Task;
-            if (locHandle.Result == null || locHandle.Result.Count == 0)
+            // Build Settingsに登録されていれば標準ロードを使用.
+            var op = SceneManager.LoadSceneAsync(sceneName);
+            if (op != null)
             {
-                Addressables.Release(locHandle);
-
-                // Build Settingsにシーンが登録されているか確認.
-                int sceneIndex = SceneUtility.GetBuildIndexByScenePath("Assets/Scenes/" + sceneName + ".unity");
-                if (sceneIndex < 0)
-                {
-                    Debug.LogError($"[SceneManager] シーン '{sceneName}' はAddressablesにもBuild Settingsにも登録されていません.");
-                    throw new System.InvalidOperationException($"シーン '{sceneName}' が見つかりません.");
-                }
-
-                // 通常のSceneManagerで読み込み.
-                Debug.Log($"[SceneManager] 通常ロードを使用: {sceneName}");
-                var op = SceneManager.LoadSceneAsync(sceneName);
-                if (op != null)
-                {
-                    await op;
-                }
-                else
-                {
-                    throw new System.InvalidOperationException($"シーン '{sceneName}' のロードに失敗しました.");
-                }
+                Debug.Log($"[SceneManager] 標準ロードを使用: {sceneName}");
+                await op;
             }
             else
             {
-                Addressables.Release(locHandle);
-                Debug.Log($"[SceneManager] Addressablesロードを使用: {sceneName}");
+                // Build Settingsに未登録の場合、Addressablesにフォールバック.
+                Debug.Log($"[SceneManager] Addressablesフォールバック: {sceneName}");
                 var sceneHandle = Addressables.LoadSceneAsync(sceneName, LoadSceneMode.Single);
                 await sceneHandle.Task;
             }
